@@ -137,6 +137,47 @@ script_command_add() {
     # chown dup:dup $_volume_path
 }
 
+# command: del <backup volume name>
+#
+# Options can be given at any position:
+#
+#   ...
+#               ...
+##
+script_command_del() {
+    local _argv=()
+    local _opts=
+
+    while [ -n "$1" ]; do
+        case "$1" in
+            -f|--force) _opts="$_opts --force"; shift ;;
+            -h|--help) script_command_help add; return ;;
+            -*) script_eval_common_option "$1"; shift ;;
+            *) _argv=("${_argv[@]}" "$1"); shift ;;
+        esac
+    done
+
+    [ "${#_argv[@]}" -lt 1 ] && nef_fatal_usage_command backup "too few arguments"
+    [ "${#_argv[@]}" -gt 1 ] && nef_fatal_usage_command backup "too many arguments"
+
+    local _user="${_argv[0]}"
+    local _key_file=/etc/ssh/nef-backup-authorized_keys/$_user
+    local _home=$(eval echo "~$_user")
+
+    nef_log "Removing user: $_user"
+    userdel $_opts $_user
+    if [[ $_home =~ ^/ ]]; then
+       if [ -d "$_home" ]; then
+           nef_log "Removing home dir: $_home"
+           rm -rf $_home
+       fi
+    fi
+    if [ -r $_key_file ]; then
+        nef_log "Removing authorized_keys file: $_key_file"
+        rm -f $_key_file
+    fi
+}
+
 # command: help [command]
 #
 # Print information about command usage.
