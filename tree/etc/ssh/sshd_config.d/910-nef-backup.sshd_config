@@ -1,0 +1,9 @@
+# See the sshd_config(5) manpage for details
+
+Match Group nef-backup
+  ForceCommand internal-sftp
+  AuthorizedKeysFile /etc/ssh/nef-backup-authorized_keys/%u
+  # ChrootDirectory /home/%u
+  X11Forwarding no
+  AllowTcpForwarding no
+  AllowAgentForwarding no
