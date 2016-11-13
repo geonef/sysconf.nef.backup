@@ -1,0 +1,15 @@
+# Installer script for sysconf profile: sysconf.nef.backup      -*- shell-script -*-
+
+. /usr/lib/sysconf.base/common.sh
+
+_packages=""
+_packages="$_packages openssh-server"
+_packages="$_packages duplicity" # to administrate backups
+# _packages="$_packages rsync"   # rsync is not used, only sftp
+
+sysconf_require_packages "$_packages"
+
+sysconf_fix_group nef-backup
+
+# sysconf_fix_user dup
+# sysconf_fix_directory ~dup/.ssh 700 dup

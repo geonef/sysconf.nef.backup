@@ -1,0 +1,236 @@
+#!/bin/bash
+#
+# nef-backup - manage pubkeys, backup's authorized_keys and chroot directories
+#
+#
+# Options configurables in /etc/default/nef-backup:
+#
+#   NEF_BACKUP_USER [backup]
+#       Name of the UNIX user owning the backups
+#
+# Hard-coded options:
+#
+#   NEF_BACKUP_CONFIG_FILE [/etc/default/nef-dup]
+#       Path to common nef-dup configuration
+#
+##
+# HISTORY
+#   20151009 first version by JF Gigand <jf@geonef.fr>
+##
+
+nef_command_name=nef-backup
+nef_command_prefix=script_command
+
+script_dir=$(dirname $(readlink -f $0))
+PATH=$script_dir:$script_dir/../share/nef-common:$script_dir/../../../../sysconf.base/tree/usr/share/nef-common:/usr/share/nef-common . shell-command || exit 2
+
+######################################################################
+# DEFAULTS AND FUNCTIONS
+
+[ -z "$HOME" ] && export HOME=~
+
+# NEF_LOG_NO_PREFIX=yes
+NEF_LOG_DATE=yes
+NEF_BACKUP_USER=dup
+NEF_BACKUP_PATH=~dup
+NEF_BACKUP_AUTHORIZED_KEYS_FILE=~dup/.ssh/authorized_keys
+
+NEF_BACKUP_CONFIG_FILE=/etc/default/$nef_command_name
+NEF_BACKUP_SSH_META_FILE=/etc/sysconf/etc.d/dup.ssh_authorized_keys.meta.conf
+
+[ -f $NEF_BACKUP_CONFIG_FILE ] && . $NEF_BACKUP_CONFIG_FILE
+[ -f $NEF_BACKUP_SSH_META_FILE ] && . $NEF_BACKUP_SSH_META_FILE
+
+script_authorized_keys_path=
+# $(eval echo "~$NEF_BACKUP_USER")
+
+######################################################################
+# COMMANDS
+
+# command: list
+#
+# List registered keys
+##
+script_command_list() {
+    local _argv=()
+
+    while [ -n "$1" ]; do
+        case "$1" in
+            -h|--help) script_command_help list; return ;;
+            -*) script_eval_common_option "$1"; shift ;;
+            *) _argv=("${_argv[@]}" "$1"); shift ;;
+        esac
+    done
+
+    [ "${#_argv[@]}" -gt 0 ] && nef_fatal_usage_command backup "too many arguments"
+
+    for keyfile in /etc/ssh/nef-backup-authorized_keys/*; do
+        local _user=$(basename $keyfile)
+        local _home=$(eval echo "~$_user")
+        local _volumes=$(ls $_home/backup)
+
+        echo "*** User/host: $_user *** Volumes: ${_volumes:-(none)}"
+        if [ yes = $nef_opt_show_verbose ]; then
+            echo "* Keys:"
+            cat $keyfile
+            echo
+            for _volume in $_volumes; do
+                echo "* Content of '$_volume':"
+                ls -l "$_home/backup/$_volume"
+            done
+            echo
+        fi
+    done
+}
+
+# command: add <backup volume name> <key type> <key> <user>
+#
+# Options can be given at any position:
+#
+#   ...
+#               ...
+##
+script_command_add() {
+    local _rsync=no
+    local _argv=()
+
+    while [ -n "$1" ]; do
+        case "$1" in
+            --rsync) _rsync=yes; shift ;;
+            -h|--help) script_command_help add; return ;;
+            -*) script_eval_common_option "$1"; shift ;;
+            *) _argv=("${_argv[@]}" "$1"); shift ;;
+        esac
+    done
+
+    [ "${#_argv[@]}" -lt 4 ] && nef_fatal_usage_command backup "too few arguments"
+    [ "${#_argv[@]}" -gt 4 ] && nef_fatal_usage_command backup "too many arguments"
+
+    # local _volume="${_argv[0]}"
+    local _user="${_argv[0]}"
+    local _type="${_argv[1]}"
+    local _key="${_argv[2]}"
+    local _key_user="${_argv[3]}"
+
+    grep -q ^$_user: /etc/passwd && nef_log "User exists already: $"
+    nef_log "Creating user: $_user"
+    useradd -M --shell /bin/false --gid nef-backup $_user
+    local _home=$(eval echo "~$_user")
+    mkdir -p $_home/backup
+    chown $_user $_home/backup
+
+    mkdir -p /etc/ssh/nef-backup-authorized_keys
+    local _key_file=/etc/ssh/nef-backup-authorized_keys/$_user
+    [ -r $_key_file ] || touch $_key_file
+    if grep -q "$_key" $_key_file; then
+        nef_log "Key is already in: $_key_file"
+    else
+        echo "no-port-forwarding,no-x11-forwarding,no-agent-forwarding $_type $_key $_key_user" >>$_key_file
+    fi
+
+    # local _volume_path=$NEF_BACKUP_PATH/$_volume
+    # local _key_file=/etc/ssh/authorized_keys.dup.d/$_volume-$_key_user.$_type.key
+    # [ -r "$_key_file" ] && nef_fatal "Key file exists already: $_key_file"
+    # echo "command=\"/usr/lib/openssh/sftp-server -d $_volume_path\",no-port-forwarding,no-x11-forwarding,no-agent-forwarding $_type $_key $_key_user" >$_key_file
+    # sysconf-etc.d update dup.ssh_authorized_keys
+    # mkdir -p $_volume_path
+    # chown dup:dup $_volume_path
+}
+
+# command: help [command]
+#
+# Print information about command usage.
+#
+# With no argument, a list of commands is printed.
+##
+script_command_help() {
+    local _options=
+    local _argv=()
+    local _command=
+
+    while [ -n "$1" ]; do
+        case "$1" in
+            --usage) _options="$_options --usage" shift ;;
+            -h) script_command_help help; return ;;
+            --) shift; _command="$1"; break ;;
+            -*) script_eval_common_option "$1"; shift ;;
+            *) _command="$1"; break ;;
+        esac
+    done
+
+    nef_show_help $_options $_command
+}
+
+
+######################################################################
+# INTERNAL FUNCTIONALITY
+
+# script_ensure_authorized_
+
+######################################################################
+# COMMAND LINE & RUN
+
+# common options:
+#   -v, --verbose               Enable verbose logging on stderr
+#   -vv, --debug-verbose        Enable debug-level verbosity (implies -v)
+#   -h, --help                  Show help for main usage or specific command
+##
+script_eval_common_option() {
+    case "$1" in
+        -v | --verbose) nef_opt_show_verbose=yes; shift ;;
+        -vv | --debug-verbose) nef_opt_show_verbose=yes; nef_opt_show_debug=yes; shift ;;
+        -h | --help) nef_show_usage; exit 0 ;;
+        -*) nef_fatal "bad option: $1, use -h for usage information" ;;
+    esac
+}
+
+nef_fatal_usage_command() {
+    local _command="$1"; shift
+
+    nef_log "$_command usage error (try: $_command -h): $*"
+    # echo >&2
+    # script_command_help --usage "$_command" >&2
+    exit 1
+}
+
+script_parse_cmdline() {
+    nef_command_merge_env
+    nef_command_init_options
+
+    script_command_argv=()
+
+    while [ -n "$1" ]; do
+
+        case "$1" in
+            -*) script_eval_common_option "$1"; shift ;;
+            *) script_command_argv=("$@"); break ;;
+        esac
+
+    done
+
+    [ -z "${script_command_argv[0]}" ] && script_command_argv=(help)
+
+
+    # Run command
+    script_command_name="${script_command_argv[0]}"
+    unset script_command_argv[0]
+    script_command_function_name="${nef_command_prefix}_${script_command_name}"
+    declare -f $script_command_function_name >/dev/null \
+        || nef_fatal_usage "invalid command: $script_command_name"
+    $script_command_function_name "${script_command_argv[@]}"
+    local _status=$?
+    if [ $_status -eq 0  ]; then
+        nef_log -v "Command returned successfully."
+    else
+        if [ "$script_return_status" != yes ]; then
+            nef_fatal "command ${script_command_name} failed with status $_status"
+        else
+            nef_log -v "command ${script_command_name} returned status $_status"
+        fi
+    fi
+    return $_status
+}
+
+######################################################################
+
+script_parse_cmdline "$@"
